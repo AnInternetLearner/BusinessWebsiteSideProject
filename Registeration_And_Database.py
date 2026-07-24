@@ -1,6 +1,6 @@
 import pathlib, sqlite3
 from Helper_Validation import *
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class DatabaseListMismatch(Exception):
@@ -26,6 +26,9 @@ class InvalidParams(Exception):
     """Error raised when operation requirements receive invalid parameter / Values Which are invalid to the ones stored."""
     pass
 
+class DatabaseError(Exception):
+    pass
+    """Error raised when database operation fails. (Should be checked during testing)"""
 
 # Just to show it's a human writing the code, I live in my house with my parents, ok bye
 class Database:
@@ -44,37 +47,40 @@ class Database:
     def table_initialization(self, table_name: str = 'registration') -> None:
         clean_table_name = table_name
         self.table_name = clean_table_name
-        with sqlite3.connect(self.db) as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"""CREATE TABLE IF NOT EXISTS {clean_table_name} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-            email TEXT CHECK (email LIKE '%_@__%.%_') COLLATE NOCASE,
-            password TEXT NOT NULL,
-            country_code TEXT DEFAULT '+91' CHECK (length(country_code) <= 5),
-            contact_number TEXT NOT NULL CHECK(length(contact_number) BETWEEN 7 AND 15),
-            account_status TEXT DEFAULT 'PENDING_VERIFICATION' CHECK(account_status IN ('ACTIVE', 'SUSPENDED', 'PENDING_VERIFICATION')),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP);""")
+        try:
+            with sqlite3.connect(self.db) as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"""CREATE TABLE IF NOT EXISTS {clean_table_name} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                email TEXT CHECK (email LIKE '%_@__%.%_') COLLATE NOCASE,
+                password TEXT NOT NULL,
+                country_code TEXT DEFAULT '+91' CHECK (length(country_code) <= 5),
+                contact_number TEXT NOT NULL CHECK(length(contact_number) BETWEEN 7 AND 15),
+                account_status TEXT DEFAULT 'PENDING_VERIFICATION' CHECK(account_status IN ('ACTIVE', 'SUSPENDED', 'PENDING_VERIFICATION')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP);""")
 
-            cursor.execute("""CREATE TABLE IF NOT EXISTS email_verification (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    email TEXT CHECK (email LIKE '%_@__%.%_'),
-                    code TEXT NOT NULL CHECK (length(code) >= 6),
-                    timestamp DATETIME NOT NULL
-                    );""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS email_verification (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        email TEXT CHECK (email LIKE '%_@__%.%_'),
+                        code TEXT NOT NULL CHECK (length(code) >= 6),
+                        timestamp DATETIME NOT NULL
+                        );""")
 
-            cursor.execute("""CREATE TABLE IF NOT EXISTS temp_login_block (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                    attempts INTEGER NOT NULL DEFAULT 0,
-                    lockout TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    attempts_expire TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    email TEXT CHECK (email LIKE '%_@__%.%_'))""")
-            cursor.execute(f"""
-                        CREATE INDEX IF NOT EXISTS idx_{clean_table_name}_username 
-                        ON {clean_table_name} (username);
-                        """)
+                cursor.execute("""CREATE TABLE IF NOT EXISTS temp_login_block (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        lockout TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        attempts_expire TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        email TEXT CHECK (email LIKE '%_@__%.%_'))""")
+                cursor.execute(f"""
+                            CREATE INDEX IF NOT EXISTS idx_{clean_table_name}_username 
+                            ON {clean_table_name} (username);
+                            """)
+        except sqlite3.Error:
+            raise DatabaseError('Database Table initialization failed.')
 
     def key_match(self, key_values: list, target_table: str) -> None:
         if target_table not in self.schemas:
@@ -85,13 +91,14 @@ class Database:
 
     def dynamic_helper(self, list_keys: list, list_values: list, table_name: str, empty_key_check=True) -> None:
         self.key_match(list_keys, table_name)
+        if empty_key_check:
+            if not list_keys:
+                raise EmptyParams('NO KEYS PROVIDED')
+
         if table_name not in self.schemas:
             raise DatasetKeyMismatch('Table NOT Mentioned')
         if len(list_values) != len(list_keys):
             raise DatabaseListMismatch('List Length Mismatch')
-        if empty_key_check:
-            if not list_keys:
-                raise EmptyParams('NO KEYS PROVIDED')
 
     # To ensure The keys are accurate to the ones made when initializing the table
     def find(self,
@@ -115,10 +122,13 @@ class Database:
         query = [f'{key} = ?' for key in list_of_keys]
         where_conditions = ' AND '.join(query)
         final_query = f'SELECT * FROM {table_name} WHERE {where_conditions}'
-        with sqlite3.connect(self.db) as conn:
-            cursor = conn.cursor()
-            cursor.execute(final_query, list_of_values)
-            return cursor.fetchall()
+        try:
+            with sqlite3.connect(self.db) as conn:
+                cursor = conn.cursor()
+                cursor.execute(final_query, list_of_values)
+                return cursor.fetchall()
+        except sqlite3.Error:
+            raise DatabaseError('Database Error (find)')
 
     def insert(self,
                list_of_values: list = None,
@@ -133,9 +143,12 @@ class Database:
         placeholders = ['?' for _ in list_of_keys]
         placeholders = ', '.join(placeholders)
         final_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-        with sqlite3.connect(self.db) as conn:
-            cursor = conn.cursor()
-            cursor.execute(final_query, list_of_values)
+        try:
+            with sqlite3.connect(self.db) as conn:
+                cursor = conn.cursor()
+                cursor.execute(final_query, list_of_values)
+        except sqlite3.Error:
+            raise DatabaseError('Database Error (insert)')
 
     def delete(self,
                list_of_values: list = None,
@@ -149,9 +162,12 @@ class Database:
         conditional_key = [f"{key} = ?" for key in list_of_keys]
         query = ' AND '.join(conditional_key)
         final_query = f"DELETE FROM {table_name} WHERE {query}"
-        with sqlite3.connect(self.db) as conn:
-            cursor = conn.cursor()
-            cursor.execute(final_query, list_of_values)
+        try:
+            with sqlite3.connect(self.db) as conn:
+                cursor = conn.cursor()
+                cursor.execute(final_query, list_of_values)
+        except sqlite3.Error:
+            raise DatabaseError('Database Error (delete)')
 
     def update(self,
                update_keys: list = None,
@@ -173,9 +189,12 @@ class Database:
         where_query = ' AND '.join(where_condition_key)
         final_query = f"UPDATE {table_name} SET {set_query} WHERE {where_query}"
         values = update_values + where_values
-        with sqlite3.connect(self.db) as conn:
-            cursor = conn.cursor()
-            cursor.execute(final_query, values)
+        try:
+            with sqlite3.connect(self.db) as conn:
+                cursor = conn.cursor()
+                cursor.execute(final_query, values)
+        except sqlite3.Error:
+            raise DatabaseError('Database Error (update)')
 
     def exists(self,
                list_of_keys: list = None,
@@ -228,7 +247,7 @@ class Database:
 
     def check_for_death_time(self, death_time: str) -> bool:
         norm_time = datetime.fromisoformat(death_time.replace(' ', 'T'))
-        return norm_time < datetime.now()
+        return norm_time < datetime.now(timezone.utc)
 
     # PERSONAL EDITED FOR ONLY THE EMAIL TABLE
     def check_if_correct_code(self, code_provided: str | int, email_user: str) -> tuple[bool, str]:
@@ -245,11 +264,11 @@ class Database:
             return True, 'Code IS AUTHENTICATED'
 
     def unused_code_deletion(self) -> None:
-        current_time_str = datetime.now().isoformat(sep=' ')
+        current_time_str = datetime.now(timezone.utc).isoformat(sep=' ')
         with sqlite3.connect(self.db) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "DELETE FROM email_verification WHERE datetime(timestamp) < ?",
+                "DELETE FROM email_verification WHERE timestamp < ?",
                 (current_time_str,))
 
 
@@ -263,13 +282,12 @@ class Register:
         self.email: str = email
         self.contact: str = contact
         self.country_code: str = country_code
-        self.password_hash: str = self.helper.hash_password(password)
         self.email_subject = 'Action Required: Verify Your Account'
 
     def check_existence(self, list_of_fields: list, list_of_values: list) -> bool:
         return True if len(self.db.find(list_of_keys=list_of_fields, list_of_values=list_of_values)) > 0 else False
 
-    def save_to_database(self) -> bool:
+    def save_to_database(self,passw : str) -> bool:
         if self.check_existence(list_of_fields=['username'], list_of_values=[self.username]):
             print(f"The username '{self.username}' is already taken.")
             return False
@@ -277,7 +295,7 @@ class Register:
             print(f"The email '{self.email}' is already in use.")
             return False
         db_keys = ['username', 'email', 'password', 'country_code', 'contact_number']
-        db_values = [self.username, self.email, self.password_hash, self.country_code, self.contact]
+        db_values = [self.username, self.email, self.helper.hash_password(passw), self.country_code, self.contact]
         try:
             self.db.insert(list_of_keys=db_keys, list_of_values=db_values)
             print(f"Account for '{self.username}' successfully created!")
@@ -323,16 +341,18 @@ class Register:
         new_code, timestamp = self.helper.generate_verification_code()
         message: str = self.small_little_message_creator(new_code)
         state,_ = self.db.exists(list_of_keys=['email'], list_of_values=[email], table_name='email_verification')
-        if not state:
-            self.db.insert(list_of_keys=['email', 'code', 'timestamp'],list_of_values=[email, new_code, timestamp], table_name='email_verification')
-        self.db.update(where_keys=['email'], where_values=[email], table_name='email_verification',
-                       update_keys=['code', 'timestamp'], update_values=[new_code, timestamp])
         hello = self.helper.email_send(sender_email=sender_email, sender_password=app_pass, recipient_email=email,
                                        subject=subject, message=message)
         if not hello:
             return False, 'INVALID EMAIL'
-        return True, ''
 
+        if not state:
+            self.db.insert(list_of_keys=['email', 'code', 'timestamp'],list_of_values=[email, new_code, timestamp], table_name='email_verification')
+        else:
+            self.db.update(where_keys=['email'], where_values=[email], table_name='email_verification',
+                       update_keys=['code', 'timestamp'], update_values=[new_code, timestamp])
+
+        return True, ''
     def verify_account(self, code_submitted: str, email: str) -> tuple[bool, str]:
         is_valid, msg = self.db.check_if_correct_code(code_provided=code_submitted, email_user=email)
         if not is_valid:

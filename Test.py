@@ -62,13 +62,13 @@ class Generator:
         lower = random.choice(string.ascii_lowercase)
         digit = random.choice(string.digits)
         symbol = random.choice("!@#$%^&*()_+-=")
-        password_length = random.randint(4, 12)
+        remain_password_length = random.randint(4, 12)
         rest = random.choices(string.ascii_lowercase + string.ascii_uppercase + string.digits + "!@#$%^&*()_+-=",
-                              k=password_length)
+                              k=remain_password_length)
         combined = list(upper + lower + digit + symbol + rest)
         random.shuffle(combined)
         joined = "".join(combined)
-        return self.helper.hash_password(joined)
+        return joined
 
     def user_generator(self) -> str:
         return self.random_string_generator()

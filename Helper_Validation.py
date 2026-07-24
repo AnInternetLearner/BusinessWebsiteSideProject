@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import importlib
 import sys
 import subprocess
@@ -64,10 +64,9 @@ class Helper:
         Helper._cache = modules_to_import
         return Helper._cache
 
-    @staticmethod
-    def generate_verification_code() -> tuple[str, str]:
+    def generate_verification_code(self) -> tuple[str, str]:
         code: str = str(100000 + secrets.randbelow(900000))
-        expiry_time: str = (datetime.now() + timedelta(minutes=5)).isoformat(sep=' ')
+        expiry_time: str = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(sep=' ')
         return code, expiry_time
 
 

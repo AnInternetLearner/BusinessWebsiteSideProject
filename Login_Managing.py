@@ -1,6 +1,6 @@
 from Registeration_And_Database import Database, Register
 from Helper_Validation import Helper, Validator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 class BadDesignError(Exception):
@@ -26,7 +26,6 @@ class Login:
     # 2nd Bool True Would mean active else would mean banned
     def check_if_email_or_user(self, suspect: str) -> str:
         is_email, _ = self.validator.validate(field_to_check=['email'], field_values=[suspect])
-        search_key = ''
         if is_email:
             search_key = 'email'
         else:
@@ -64,8 +63,8 @@ class Login:
         lockout_temp = output[3]
         if not lockout_temp:
             return False, False
-        cleansed_lockout_temp = datetime.fromisoformat(lockout_temp.replace(' ', 'T'))
-        if cleansed_lockout_temp > datetime.now():
+        cleansed_lockout_temp = datetime.fromisoformat(lockout_temp.replace(' ', 'T')).replace(tzinfo=timezone.utc)
+        if cleansed_lockout_temp > datetime.now(timezone.utc):
             return True, 'YOU ARE LOCKED OUT FOR REPEATED LOGIN ATTEMPTS'
         return False, False
 
@@ -94,16 +93,16 @@ class Login:
             output = self.db.find(table_name='temp_login_block', list_of_keys=[search_key],
                                   list_of_values=[username_or_email])
         attempts = output[0][2]
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         attempts_expire_raw = output[0][4]
         if attempts_expire_raw:
-            attempts_expire_dt = datetime.fromisoformat(attempts_expire_raw.replace(' ','T'))
+            attempts_expire_dt = datetime.fromisoformat(attempts_expire_raw.replace(' ','T')).replace(tzinfo=timezone.utc)
             if now > attempts_expire_dt:
                 attempts = 0
         new_attempt = attempts + 1
         if new_attempt >= 20:
             lockout_penalty = ((new_attempt - 20) * 1.5) + 1
-            final_lockdown_penalty = datetime.now() + timedelta(seconds=lockout_penalty)
+            final_lockdown_penalty = datetime.now(timezone.utc) + timedelta(seconds=lockout_penalty)
         else:
             final_lockdown_penalty = now
         attempt_expiry = 70
@@ -135,7 +134,7 @@ class Login:
                               list_of_values=[username_or_email])
         if len(output) == 0:
             raise BadDesignError('Its as simple as writing A LINE OF CODE TO CHECK IF THE ROW EXISTS OR NOT')
-        now = datetime.now().isoformat(sep=' ')
+        now = datetime.now(timezone.utc).isoformat(sep=' ')
         self.db.update(update_keys=['last_login'], update_values=[now], where_keys=[search_key],
                        where_values=[username_or_email], table_name='registration')
 
@@ -176,4 +175,5 @@ class ForgotPass:
         output = self.db.find(table_name='registration',list_of_keys=[decider],list_of_values=[username_or_email])
         if len(output) == 0:
             raise BadDesignError('CHECK Existence In the Main Function')
-        return output[0][2]
+        email_index = self.db.schemas['registration'].index('email')
+        return output[0][email_index]
